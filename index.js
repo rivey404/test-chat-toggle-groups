@@ -30,7 +30,10 @@ jQuery(async () => {
     await loadSettings();
     const toggleMenu = await $.get(`${extensionFolderPath}/toggle-menu.html`);
     $('.range-block.m-b-1').before(toggleMenu);
-
+    
+    // Initialize container reference AFTER adding the toggle menu to the DOM
+    $toggleGroupsContainer = $('.toggle-groups');
+    
     // Load groups for the current preset
     loadGroupsForCurrentPreset();
     attachGroupEventListeners();
@@ -83,13 +86,6 @@ jQuery(async () => {
     });
 });
 
-function loadGroupsForCurrentPreset() {
-    const currentPreset = oai_settings.preset_settings_openai;
-    const groups = extensionSettings.presets[currentPreset] || [];
-    loadGroups(groups);
-    attachGroupEventListeners();
-}
-
 async function loadSettings() {
     // Initialize extension_settings[extensionName] with default settings if it doesn't exist
     if (!extension_settings[extensionName]) {
@@ -115,9 +111,8 @@ async function loadSettings() {
     const toggleItemTemplate = await $.get(`${extensionFolderPath}/toggle-item-template.html`);
     // Store the template in the extension settings for later use
     extensionSettings.toggleItemTemplate = toggleItemTemplate;
-
-    // Initialize cached DOM references
-    $toggleGroupsContainer = $('.toggle-groups');
+    
+    // Remove container initialization from here since toggle-groups doesn't exist yet
 }
 
 function loadGroups(groups) {
@@ -156,6 +151,10 @@ function loadGroups(groups) {
             element: $groupElement
         };
     });
+
+    console.log(`Loaded ${groups.length} toggle groups`);
+    console.log(`Toggle groups container found: ${$toggleGroupsContainer.length > 0}`);
+    console.log(`Groups lookup map has ${Object.keys(groupLookupMap).length} entries`);
 }
 
 function addToggle($group, groupName) {
