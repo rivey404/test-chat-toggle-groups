@@ -83,6 +83,15 @@ jQuery(async () => {
     eventSource.on(event_types.OAI_PRESET_EXPORT_READY, handlePresetExport);
     eventSource.on(event_types.OAI_PRESET_IMPORT_READY, handlePresetImport);
     eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, loadGroupsForCurrentPreset);
+
+    // Add a global handler for SillyTavern's own drawer toggles
+    $(document).on('click', '.inline-drawer-header', function() {
+        const drawer = $(this).closest('.inline-drawer')[0];
+        // Short delay to let SillyTavern's own code run first
+        setTimeout(() => {
+            handleDrawerToggle(drawer);
+        }, 50);
+    });
 });
 
 function handlePresetExport(preset) {
@@ -200,6 +209,9 @@ function loadGroups(groups) {
     
     // Add all groups at once
     domCache.toggleGroups.appendChild(fragment);
+    
+    // Setup drawer observer after DOM is updated
+    setupDrawerObserver();
 }
 
 function populateTargetSelect(selectElement) {
@@ -270,6 +282,18 @@ function setupEventDelegation() {
         } else if (addToggleGroup) {
             handleAddGroupClick();
         }
+
+        // Handle drawer toggle clicks
+        const drawerToggle = e.target.closest('.inline-drawer-toggle');
+        if (drawerToggle) {
+            const drawer = drawerToggle.closest('.inline-drawer');
+            if (drawer) {
+                // Add a small delay to allow for DOM updates
+                setTimeout(() => {
+                    handleDrawerToggle(drawer);
+                }, 10);
+            }
+        }
     });
     
     // Handle select changes using event delegation
@@ -288,6 +312,64 @@ function setupEventDelegation() {
             extensionSettings.disableAnimation = domCache.disableAnimationCheckbox.checked;
             debouncedSaveSettings();
         }
+    });
+}
+
+function handleDrawerToggle(drawer) {
+    const content = drawer.querySelector('.inline-drawer-content');
+    const isOpen = drawer.classList.contains('open');
+    
+    if (isOpen) {
+        // Calculate proper height when opening
+        const contentHeight = calculateContentHeight(content);
+        content.style.maxHeight = contentHeight + 'px';
+        
+        // Make sure toggle items are properly visible
+        const toggleItems = drawer.querySelectorAll('.toggle-item');
+        toggleItems.forEach(item => {
+            item.style.opacity = '1';
+        });
+    } else {
+        // Reset height when closing
+        content.style.maxHeight = '0';
+    }
+}
+
+function calculateContentHeight(content) {
+    // Clone the content to measure its full height without constraints
+    const clone = content.cloneNode(true);
+    
+    // Make it invisible but rendered
+    clone.style.position = 'absolute';
+    clone.style.visibility = 'hidden';
+    clone.style.maxHeight = 'none';
+    clone.style.height = 'auto';
+    
+    // Add to DOM temporarily to get measurements
+    document.body.appendChild(clone);
+    const height = clone.offsetHeight;
+    document.body.removeChild(clone);
+    
+    return height + 20; // Add a bit of extra space
+}
+
+// Since SillyTavern might use its own drawer logic, add a mutation observer to catch drawer state changes
+function setupDrawerObserver() {
+    // Create a mutation observer to watch for class changes
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && 
+                mutation.attributeName === 'class' && 
+                mutation.target.classList.contains('inline-drawer')) {
+                
+                handleDrawerToggle(mutation.target);
+            }
+        });
+    });
+    
+    // Start observing all drawers
+    document.querySelectorAll('.toggle-group').forEach(drawer => {
+        observer.observe(drawer, { attributes: true });
     });
 }
 
@@ -347,6 +429,12 @@ function handleToggleDuplicate(duplicateButton) {
     
     // Update settings
     updateToggleSettings(group);
+    
+    // Ensure drawer height is recalculated if it's open
+    const drawer = group.closest('.inline-drawer');
+    if (drawer && drawer.classList.contains('open')) {
+        handleDrawerToggle(drawer);
+    }
 }
 
 function handleToggleDelete(toggleDelete) {
@@ -382,6 +470,12 @@ function addToggle(group, groupName) {
             behavior: 'direct' // Set default behavior
         });
         debouncedSaveSettings();
+        
+        // Refresh drawer height if open
+        const drawer = group.closest('.inline-drawer');
+        if (drawer && drawer.classList.contains('open')) {
+            handleDrawerToggle(drawer);
+        }
     }
 }
 
