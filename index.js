@@ -227,9 +227,13 @@ function loadGroups(groups) {
 // Prepare options HTML once to avoid repetitive DOM creation
 function prepareTargetOptions(promptManager) {
     const prompts = promptManager.serviceSettings.prompts;
+    
+    // Sort prompts alphabetically by name
+    const sortedPrompts = [...prompts].sort((a, b) => a.name.localeCompare(b.name));
+    
     let optionsHtml = '<option value="" disabled hidden selected>Select a target</option>';
     
-    prompts.forEach(prompt => {
+    sortedPrompts.forEach(prompt => {
         optionsHtml += `<option value="${prompt.identifier}" data-identifier="${prompt.identifier}">${escapeString(prompt.name)}</option>`;
     });
     
