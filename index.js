@@ -167,16 +167,29 @@ function addToggle($group, groupName) {
 
     $toggleList.append($newToggle);
 
-    // Update the settings
+    // Update the settings using the lookup map instead of finding the group each time
     const currentPreset = oai_settings.preset_settings_openai;
-    const groups = extensionSettings.presets[currentPreset];
-    const group = groups.find(g => g.name === groupName);
-    if (group) {
-        group.toggles.push({
+    const groupInfo = groupLookupMap[groupName];
+    
+    if (groupInfo && groupInfo.data) {
+        groupInfo.data.toggles.push({
             target: '',
             behavior: 'direct' // Set default behavior
         });
         saveSettings();
+    } else {
+        console.error(`Group "${groupName}" not found in lookup map when adding toggle.`);
+        
+        // Fallback to the old method if lookup map fails
+        const groups = extensionSettings.presets[currentPreset];
+        const group = groups.find(g => g.name === groupName);
+        if (group) {
+            group.toggles.push({
+                target: '',
+                behavior: 'direct'
+            });
+            saveSettings();
+        }
     }
 }
 
@@ -492,6 +505,7 @@ async function onAddGroupClick() {
             toastr.warning(`Group "${groupName}" already exists!"`);
             return;
         }
+        
         const newGroup = {
             name: groupName,
             toggles: [],
@@ -500,10 +514,18 @@ async function onAddGroupClick() {
 
         const currentPreset = oai_settings.preset_settings_openai;
         extensionSettings.presets[currentPreset] = extensionSettings.presets[currentPreset] || [];
-        extensionSettings.presets[currentPreset].push(newGroup);
+        const groups = extensionSettings.presets[currentPreset];
+        groups.push(newGroup);
 
         const $groupElement = $(extensionSettings.drawerTemplate.replace('{{GROUP_NAME}}', groupName));
-        $('.toggle-groups').append($groupElement);
+        $toggleGroupsContainer.append($groupElement);
+        
+        // Update the lookup map with the new group
+        groupLookupMap[groupName] = {
+            data: newGroup,
+            index: groups.length - 1,
+            element: $groupElement
+        };
 
         // Save the updated settings
         saveSettings();
