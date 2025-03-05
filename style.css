@@ -52,14 +52,10 @@
     align-items: center;
     margin-bottom: 10px;
     border-radius: 5px;
-    line-height: 2;
-    /* Using hardware acceleration for smoother transitions */
+    transition: color 0.3s ease-in-out, background-color 0.3s ease-in-out;
+    line-height: 2; /* Added line-height property */
+    will-change: transform, opacity, background-color;
     transform: translateZ(0);
-    will-change: background-color, color, opacity;
-    min-height: 40px; /* Ensure minimum height for toggle items */
-    box-sizing: border-box; /* Include padding in the element's total width and height */
-    padding: 5px; /* Add some padding inside toggle items */
-    flex-shrink: 0; /* Prevent toggle items from shrinking */
 }
 
 .toggle-item .toggle-target {
@@ -68,28 +64,18 @@
     margin-top: 5px;
     margin-left: 10px;
     padding-left: 5px;
-    height: 30px; /* Consistent height for form elements */
-    align-self: center; /* Center vertically */
-    margin-top: 0; /* Reset margins that might cause misalignment */
-    margin-bottom: 0;
 }
 
 .toggle-item .toggle-behavior {
-    width: 60px;
+    width: 60px; /* Adjust this value as needed */
     margin-right: 10px;
     margin-top: 5px;
-    height: 30px; /* Consistent height for form elements */
-    align-self: center; /* Center vertically */
-    margin-top: 0; /* Reset margins that might cause misalignment */
-    margin-bottom: 0;
 }
 
 .toggle-actions {
     display: flex;
     align-items: center;
     margin-right: 10px;
-    height: 30px; /* Match height with other elements */
-    flex-shrink: 0; /* Prevent shrinking */
 }
 
 .toggle-actions i {
@@ -97,6 +83,7 @@
     cursor: pointer;
 }
 
+/* Increase the font size for emoji */
 .toggle-behavior {
     font-size: 18px;
 }
@@ -104,12 +91,14 @@
 .toggle-item.enabled {
     background-color: #5ee97e;
     color: #155724;
+    transition: background-color 0.2s ease-out, color 0.2s ease-out, opacity 0.2s ease-out;
 }
 
 .toggle-item.disabled {
     background-color: #f36767;
     color: #6c757d;
     opacity: 0.5;
+    transition: background-color 0.2s ease-out, color 0.2s ease-out, opacity 0.2s ease-out;
 }
 
 .linked-toggle-header {
@@ -137,56 +126,12 @@
 .toggle-actions {
     display: flex;
     align-items: center;
-    vertical-align: middle;
+    vertical-align: middle; /* Align buttons vertically with the select elements */
 }
 
-/* Optimized transitions for better performance */
-@media screen {
-    .toggle-item {
-        transition: background-color 0.3s ease-out, color 0.3s ease-out, opacity 0.3s ease-out;
-    }
-    
-    /* Disable animations when requested */
-    .disable-animations .toggle-item {
-        transition: none !important;
-    }
-}
-
-/* Fix for toggle items overlapping when drawer opens */
-.inline-drawer-content {
-    overflow: hidden; /* Ensures content doesn't spill out during transitions */
-    transition: max-height 0.3s ease-in-out;
-}
-
-.toggle-list {
-    padding-top: 5px; /* Add some space at the top */
-    padding-bottom: 5px; /* Add some space at the bottom */
-    display: flex;
-    flex-direction: column;
-    gap: 8px; /* Create consistent spacing between items */
-}
-
-/* Ensure proper drawer expansion */
-.inline-drawer.wide100p {
-    width: 100%;
-    margin-bottom: 15px; /* Add space between drawers */
-}
-
-/* Fix for Safari and some browsers where height transitions might not work properly */
-.inline-drawer.wide100p .inline-drawer-content {
-    display: flex;
-    flex-direction: column;
-}
-
-/* Fix drawer animation */
-.inline-drawer .inline-drawer-content {
-    position: relative;
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease-in-out;
-}
-
-.inline-drawer.open .inline-drawer-content {
-    max-height: 1000px; /* Large enough to fit content */
-    overflow: visible; /* Allow content to be visible when drawer is open */
+/* Add a class for fade transitions */
+.toggle-item.fade-out {
+    background-color: transparent !important;
+    color: transparent !important;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
