@@ -16,49 +16,74 @@ let extensionSettings = extension_settings[extensionName];
 const defaultSettings = {
     version: "1.0.0",
     presets: {},
-    disableAnimation: true, // Add this new setting
+    disableAnimation: true, // Default animation to disabled for better performance
+    saveDebounceMs: 1000, // Add debounce control setting
 };
+
+// Cache for DOM elements
+const domCache = {};
+
+// Cache for prompt managers
+let promptManagerCache = null;
+let lastPreset = null;
 
 const escapeString = (str) => str.replace(/[&<>"']/g, match => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;',
 })[match]);
 
-let groupLookupMap = {}; // For fast group lookup by name
-let $toggleGroupsContainer; // Cache the container reference
+// Use a Map for faster group lookups
+const groupNameMap = new Map();
 
-// Add this helper function at the top level to help with debugging
-function logCurrentGroups() {
-    const currentPreset = oai_settings.preset_settings_openai;
-    const groups = extensionSettings.presets[currentPreset] || [];
-    console.log(`Current preset: ${currentPreset}`);
-    console.log(`Groups for current preset:`, groups);
-    return groups;
-}
+// Debounce the settings save with a longer delay
+const debouncedSaveSettings = (() => {
+    let timer = null;
+    return () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            extension_settings[extensionName] = extensionSettings;
+            saveSettingsDebounced();
+        }, extensionSettings.saveDebounceMs || 1000);
+    };
+})();
 
 jQuery(async () => {
     await loadSettings();
     const toggleMenu = await $.get(`${extensionFolderPath}/toggle-menu.html`);
     $('.range-block.m-b-1').before(toggleMenu);
     
-    // Initialize container reference AFTER adding the toggle menu to the DOM
-    $toggleGroupsContainer = $('.toggle-groups');
+    // Cache frequently accessed DOM elements
+    domCache.$toggleGroups = $('.toggle-groups');
+    domCache.$disableAnimationCheckbox = $('#disable-animation-checkbox');
     
-    console.log('Toggle groups container found:', $toggleGroupsContainer.length);
-    console.log('Add toggle group button found:', $('.add-toggle-group').length);
+    // Load groups for the current preset
+    loadGroupsForCurrentPreset();
     
-    // Make sure event handlers are attached properly
-    $('.add-toggle-group').off('click').on('click', function() {
-        console.log('Add toggle group button clicked');
-        onAddGroupClick();
+    // Attach event listeners once using event delegation
+    attachEventListeners();
+    
+    // Initialize the "Disable Animation" checkbox
+    domCache.$disableAnimationCheckbox.prop('checked', extensionSettings.disableAnimation);
+
+    // Event listeners for preset changes and exports/imports
+    setupEventListeners();
+});
+
+function setupEventListeners() {
+    // Add toggle group button
+    $(".add-toggle-group").on("click", onAddGroupClick);
+    
+    // Disable animation checkbox
+    domCache.$disableAnimationCheckbox.on('change', () => {
+        extensionSettings.disableAnimation = domCache.$disableAnimationCheckbox.is(':checked');
+        debouncedSaveSettings();
     });
     
-    // Load groups for the current preset and log results
-    const loadedGroups = loadGroupsForCurrentPreset();
-    console.log('Loaded groups count:', loadedGroups ? loadedGroups.length : 0);
+    // Preset change event
+    eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => {
+        loadGroupsForCurrentPreset();
+    });
     
-    // Always attach event handlers, even if no groups are loaded
-    attachGroupEventListeners();
-
+    // Export/Import events
     eventSource.on(event_types.OAI_PRESET_EXPORT_READY, (preset) => {
         const currentPreset = oai_settings.preset_settings_openai;
 
@@ -75,34 +100,31 @@ jQuery(async () => {
     eventSource.on(event_types.OAI_PRESET_IMPORT_READY, (importedPreset) => {
         if (importedPreset.data.linkedToggleGroups) {
             const importedData = importedPreset.data.linkedToggleGroups;
-
-            // Check the version of the imported data
-
+            
             // Update the extension settings with the imported data
             extensionSettings.presets[importedPreset.presetName] = importedData.groups;
-
+            
+            // Rebuild group name map
+            buildGroupNameMap();
+            
             // Save the updated settings
-            saveSettings();
-
+            debouncedSaveSettings();
+            
             // Reload the groups for the current preset
             loadGroupsForCurrentPreset();
         }
     });
+}
 
-    const $disableAnimationCheckbox = $('#disable-animation-checkbox');
-    $disableAnimationCheckbox.prop('checked', extensionSettings.disableAnimation);
-
-    // Add event listener for the "Disable Animation" checkbox
-    $('#disable-animation-checkbox').on('change', () => {
-        extensionSettings.disableAnimation = $('#disable-animation-checkbox').is(':checked');
-        saveSettings();
+function buildGroupNameMap() {
+    groupNameMap.clear();
+    const currentPreset = oai_settings.preset_settings_openai;
+    const groups = extensionSettings.presets[currentPreset] || [];
+    
+    groups.forEach((group, index) => {
+        groupNameMap.set(group.name.toLowerCase(), { group, index });
     });
-
-    // Add event listener for preset changes
-    eventSource.on(event_types.OAI_PRESET_CHANGED_AFTER, () => {
-        loadGroupsForCurrentPreset();
-    });
-});
+}
 
 async function loadSettings() {
     // Initialize extension_settings[extensionName] with default settings if it doesn't exist
@@ -120,26 +142,50 @@ async function loadSettings() {
         }
     }
 
-    // Load the drawer template
-    const drawerTemplate = await $.get(`${extensionFolderPath}/drawer-template.html`);
-    // Store the template in the extension settings for later use
-    extensionSettings.drawerTemplate = drawerTemplate;
-
-    // Load the toggle item template
-    const toggleItemTemplate = await $.get(`${extensionFolderPath}/toggle-item-template.html`);
-    // Store the template in the extension settings for later use
-    extensionSettings.toggleItemTemplate = toggleItemTemplate;
+    // Load templates just once and cache them
+    const [drawerTemplate, toggleItemTemplate] = await Promise.all([
+        $.get(`${extensionFolderPath}/drawer-template.html`),
+        $.get(`${extensionFolderPath}/toggle-item-template.html`)
+    ]);
     
-    // Remove container initialization from here since toggle-groups doesn't exist yet
+    // Store the templates in the extension settings for later use
+    extensionSettings.drawerTemplate = drawerTemplate;
+    extensionSettings.toggleItemTemplate = toggleItemTemplate;
+}
+
+function getPromptManager() {
+    // Cache the prompt manager to avoid repeated creation
+    const currentPreset = oai_settings.preset_settings_openai;
+    if (!promptManagerCache || lastPreset !== currentPreset) {
+        promptManagerCache = setupChatCompletionPromptManager(oai_settings);
+        lastPreset = currentPreset;
+    }
+    return promptManagerCache;
+}
+
+function loadGroupsForCurrentPreset() {
+    const currentPreset = oai_settings.preset_settings_openai;
+    const groups = extensionSettings.presets[currentPreset] || [];
+    
+    // Rebuild the group name map for quick lookups
+    buildGroupNameMap();
+    
+    // Load the groups into the UI
+    loadGroups(groups);
 }
 
 function loadGroups(groups) {
-    // Reset the lookup map
-    groupLookupMap = {};
+    if (!domCache.$toggleGroups) {
+        domCache.$toggleGroups = $('.toggle-groups');
+    }
     
-    $toggleGroupsContainer.empty(); // Use cached reference
+    domCache.$toggleGroups.empty(); // Clear existing groups
 
-    groups.forEach((group, index) => {
+    // Create a document fragment for better performance
+    const fragment = document.createDocumentFragment();
+    const promptManager = getPromptManager();
+
+    groups.forEach(group => {
         const $groupElement = $(extensionSettings.drawerTemplate.replace('{{GROUP_NAME}}', escapeString(group.name)));
         const $toggleList = $groupElement.find('.toggle-list');
         const $toggleAction = $groupElement.find('.linked-toggle-group-action');
@@ -151,137 +197,167 @@ function loadGroups(groups) {
             $toggleAction.removeClass('fa-toggle-on').addClass('fa-toggle-off');
         }
 
+        // Create all toggle items at once
+        const toggleItemsFragment = document.createDocumentFragment();
+        
+        // Prepare all options once
+        const targetOptions = prepareTargetOptions(promptManager);
+        
         group.toggles.forEach(toggle => {
             const $toggleItem = $(extensionSettings.toggleItemTemplate);
-            populateTargetSelect($toggleItem.find('.toggle-target')); // Populate target options first
-            $toggleItem.find('.toggle-target').val(toggle.target); // Then set the saved target
+            const $target = $toggleItem.find('.toggle-target');
+            
+            // Populate target select efficiently
+            $target.html(targetOptions);
+            $target.val(toggle.target);
+            
             $toggleItem.find('.toggle-behavior').val(toggle.behavior);
-            $toggleItem.attr('data-target', toggle.target); // Add data-target attribute
-            $toggleList.append($toggleItem);
+            $toggleItem.attr('data-target', toggle.target);
+            
+            toggleItemsFragment.appendChild($toggleItem[0]);
         });
 
-        $toggleGroupsContainer.append($groupElement);
-
-        // Add to lookup map for faster access
-        groupLookupMap[group.name] = {
-            data: group,
-            index: index,
-            element: $groupElement
-        };
+        $toggleList.append(toggleItemsFragment);
+        fragment.appendChild($groupElement[0]);
     });
 
-    console.log(`Loaded ${groups.length} toggle groups`);
-    console.log(`Toggle groups container found: ${$toggleGroupsContainer.length > 0}`);
-    console.log(`Groups lookup map has ${Object.keys(groupLookupMap).length} entries`);
+    domCache.$toggleGroups.append(fragment);
+}
+
+// Prepare options HTML once to avoid repetitive DOM creation
+function prepareTargetOptions(promptManager) {
+    const prompts = promptManager.serviceSettings.prompts;
+    let optionsHtml = '<option value="" disabled hidden selected>Select a target</option>';
+    
+    prompts.forEach(prompt => {
+        optionsHtml += `<option value="${prompt.identifier}" data-identifier="${prompt.identifier}">${escapeString(prompt.name)}</option>`;
+    });
+    
+    return optionsHtml;
+}
+
+function attachEventListeners() {
+    // Use event delegation for most events to improve performance
+    const $body = $('body');
+    
+    // Group toggle actions
+    $body.on("click", ".linked-toggle-group-action", function(e) {
+        e.stopPropagation();
+        const $toggle = $(this);
+        const $group = $toggle.closest('.toggle-group');
+        const groupName = $group.find('.group-name').text();
+
+        $toggle.toggleClass('fa-toggle-off fa-toggle-on');
+
+        const isOn = $toggle.hasClass('fa-toggle-on');
+        updateGroupState(groupName, isOn);
+    });
+
+    // Group name editing
+    $body.on("click", ".linked-toggle-group-edit", function(e) {
+        e.stopPropagation();
+        const $group = $(this).closest('.toggle-group');
+        const groupName = $group.find('.group-name').text();
+        editGroupName($group, groupName);
+    });
+
+    // Add toggle to group
+    $body.on("click", ".add-toggle", function() {
+        const $group = $(this).closest('.toggle-group');
+        const groupName = $group.find('.group-name').text();
+        addToggle($group, groupName);
+    });
+
+    // Group movement
+    $body.on("click", ".group-move-up, .group-move-down", function(e) {
+        e.stopPropagation();
+        const $group = $(this).closest('.toggle-group');
+        const direction = $(this).hasClass('group-move-up') ? 'up' : 'down';
+        moveGroup($group, direction);
+    });
+
+    // Delete group
+    $body.on("click", ".delete-group", function(e) {
+        e.stopPropagation();
+        const $group = $(this).closest('.toggle-group');
+        const groupName = $group.find('.group-name').text();
+        deleteGroup($group, groupName);
+    });
+
+    // Toggle item actions
+    $body.on("click", ".linked-toggle-duplicate", function(e) {
+        e.stopImmediatePropagation();
+        duplicateToggleItem($(this));
+    });
+
+    $body.on("click", ".linked-toggle-delete", function(e) {
+        e.stopImmediatePropagation();
+        const $toggleItem = $(this).closest('.toggle-item');
+        const $group = $toggleItem.closest('.toggle-group');
+        $toggleItem.remove();
+        // Update settings
+        updateToggleSettings($group);
+    });
+
+    // Toggle target/behavior changes
+    $body.on("change", ".toggle-target, .toggle-behavior", function() {
+        const $group = $(this).closest('.toggle-group');
+        updateToggleSettings($group);
+    });
+
+    $body.on("change", ".toggle-target", function() {
+        const $toggleItem = $(this).closest('.toggle-item');
+        const newTarget = $(this).val();
+        $toggleItem.attr('data-target', newTarget);
+    });
+}
+
+function duplicateToggleItem($button) {
+    const $toggleItem = $button.closest('.toggle-item');
+    const $group = $toggleItem.closest('.toggle-group');
+    const $newToggleItem = $(extensionSettings.toggleItemTemplate);
+    
+    // Copy behavior
+    const behavior = $toggleItem.find('.toggle-behavior').val();
+    $newToggleItem.find('.toggle-behavior').val(behavior);
+    
+    // Get prompt manager once
+    const promptManager = getPromptManager();
+    
+    // Reuse target options
+    const targetOptions = prepareTargetOptions(promptManager);
+    $newToggleItem.find('.toggle-target').html(targetOptions);
+    
+    $toggleItem.after($newToggleItem);
+    
+    // Update settings
+    updateToggleSettings($group);
 }
 
 function addToggle($group, groupName) {
     const $toggleList = $group.find('.toggle-list');
     const $newToggle = $(extensionSettings.toggleItemTemplate);
-
-    // Populate the target select with available options
-    populateTargetSelect($newToggle.find('.toggle-target'));
-
+    
+    // Get prompt manager once and reuse
+    const promptManager = getPromptManager();
+    
+    // Efficiently populate the target select with prepared options
+    $newToggle.find('.toggle-target').html(prepareTargetOptions(promptManager));
+    
     $toggleList.append($newToggle);
 
-    // Update the settings using the lookup map instead of finding the group each time
-    const currentPreset = oai_settings.preset_settings_openai;
-    const groupInfo = groupLookupMap[groupName];
-    
-    if (groupInfo && groupInfo.data) {
-        groupInfo.data.toggles.push({
-            target: '',
-            behavior: 'direct' // Set default behavior
-        });
-        saveSettings();
-    } else {
-        console.error(`Group "${groupName}" not found in lookup map when adding toggle.`);
-        
-        // Fallback to the old method if lookup map fails
-        const groups = extensionSettings.presets[currentPreset];
-        const group = groups.find(g => g.name === groupName);
-        if (group) {
-            group.toggles.push({
-                target: '',
-                behavior: 'direct'
-            });
-            saveSettings();
-        }
-    }
-}
-
-function populateTargetSelect($select) {
-    const promptManager = setupChatCompletionPromptManager(oai_settings);
-    const prompts = promptManager.serviceSettings.prompts;
-
-    $select.empty(); // Clear existing options
-    $select.append($('<option>', {
-        value: '',
-        text: 'Select a target',
-        disabled: true,
-        hidden: true,
-        selected: true
-    }));
-
-    prompts.forEach(prompt => {
-        $select.append($('<option>', {
-            value: prompt.identifier,
-            text: prompt.name,
-            'data-identifier': prompt.identifier
-        }));
-    });
-}
-
-function attachGroupEventListeners() {
-    console.log('Attaching group event listeners');
-    
-    // Always use document-level delegation for dynamically added elements
-    $(document).off('click', '.toggle-groups .add-toggle').on('click', '.toggle-groups .add-toggle', function() {
-        console.log('Add toggle button clicked');
-        const $group = $(this).closest('.toggle-group');
-        const groupName = $group.find('.group-name').text();
-        console.log('Adding toggle to group:', groupName);
-        addToggle($group, groupName);
-    });
-    
-    // Use more specific delegation for other handlers
-    if (!extensionSettings.eventHandlersAttached) {
-        // Use document-level delegation for all other handlers too
-        $(document).on("click", ".toggle-groups .linked-toggle-group-action", function(e) {
-            e.stopPropagation();
-            const $toggle = $(this);
-            const $group = $toggle.closest('.toggle-group');
-            const groupName = $group.find('.group-name').text();
-
-            $toggle.toggleClass('fa-toggle-off fa-toggle-on');
-
-            const isOn = $toggle.hasClass('fa-toggle-on');
-            updateGroupState(groupName, isOn);
-        });
-
-        // ...existing code for other handlers but replace $toggleGroups with $(document)...
-        // For example:
-        $(document).on("click", ".toggle-groups .linked-toggle-group-edit", function(e) {
-            e.stopPropagation();
-            const $group = $(this).closest('.toggle-group');
-            const groupName = $group.find('.group-name').text();
-            editGroupName($group, groupName);
-        });
-
-        // ...and so on for other handlers...
-        
-        extensionSettings.eventHandlersAttached = true;
-    }
+    // Update the settings
+    updateToggleSettings($group);
 }
 
 function updateToggleSettings($group) {
     const groupName = $group.find('.group-name').text();
-    const currentPreset = oai_settings.preset_settings_openai;
-    const groups = extensionSettings.presets[currentPreset];
-    const group = groups.find(g => g.name === groupName);
-
-    if (group) {
+    const groupData = groupNameMap.get(groupName.toLowerCase());
+    
+    if (groupData) {
+        const { group } = groupData;
         group.toggles = [];
+        
         $group.find('.toggle-item').each(function() {
             const $item = $(this);
             group.toggles.push({
@@ -289,7 +365,8 @@ function updateToggleSettings($group) {
                 behavior: $item.find('.toggle-behavior').val()
             });
         });
-        saveSettings();
+        
+        debouncedSaveSettings();
     }
 }
 
@@ -300,159 +377,126 @@ function moveGroup($group, direction) {
     const groups = extensionSettings.presets[currentPreset];
 
     if (direction === 'up' && index > 0) {
-        // Cache the DOM elements
-        const $prevGroup = $groups.eq(index - 1);
-        
-        // Update DOM directly
-        $group.insertBefore($prevGroup);
-        
-        // Update data array
-        const temp = groups[index];
-        groups[index] = groups[index - 1];
-        groups[index - 1] = temp;
-        
-        // Update lookup map indices
-        updateLookupMapIndices();
+        $group.insertBefore($groups.eq(index - 1));
+        [groups[index], groups[index - 1]] = [groups[index - 1], groups[index]];
     } else if (direction === 'down' && index < $groups.length - 1) {
-        // Similar optimization for moving down
-        const $nextGroup = $groups.eq(index + 1);
-        
-        // Update DOM directly
-        $group.insertAfter($nextGroup);
-        
-        // Update data array
-        const temp = groups[index];
-        groups[index] = groups[index + 1];
-        groups[index + 1] = temp;
-        
-        // Update lookup map indices
-        updateLookupMapIndices();
+        $group.insertAfter($groups.eq(index + 1));
+        [groups[index], groups[index + 1]] = [groups[index + 1], groups[index]];
     }
 
-    saveSettings();
-}
-
-// Add this helper function
-function updateLookupMapIndices() {
-    const $groups = $('.toggle-group');
-    $groups.each((index, element) => {
-        const groupName = $(element).find('.group-name').text();
-        if (groupLookupMap[groupName]) {
-            groupLookupMap[groupName].index = index;
-        }
-    });
+    // Rebuild group name map after reordering
+    buildGroupNameMap();
+    debouncedSaveSettings();
 }
 
 function updateGroupState(groupName, isOn) {
-    const currentPreset = oai_settings.preset_settings_openai;
-    if (!extensionSettings.presets[currentPreset]) {
-        extensionSettings.presets[currentPreset] = [];
-    }
-    const groups = extensionSettings.presets[currentPreset];
+    const groupData = groupNameMap.get(groupName.toLowerCase());
     
-    // Use lookup map instead of findIndex
-    const groupInfo = groupLookupMap[groupName];
-    if (groupInfo) {
-        groupInfo.data.isOn = isOn;
-        saveSettings();
+    if (groupData) {
+        const { group } = groupData;
+        group.isOn = isOn;
+        debouncedSaveSettings();
 
-        // Apply the toggle state to all targets in the group
-        const promptManager = setupChatCompletionPromptManager(oai_settings);
-        groupInfo.data.toggles.forEach(toggle => {
-            applyToggleBehavior(promptManager, toggle, isOn);
+        // Get prompt manager once for all toggle operations
+        const promptManager = getPromptManager();
+        const counts = promptManager.tokenHandler.getCounts();
+        const affectedPrompts = new Set();
+        
+        // Process all toggles efficiently
+        group.toggles.forEach(toggle => {
+            const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, toggle.target);
+            
+            if (!promptOrderEntry) {
+                console.error(`Prompt order entry not found for target: ${toggle.target}`);
+                return;
+            }
+
+            switch (toggle.behavior) {
+                case 'direct':
+                    promptOrderEntry.enabled = isOn;
+                    break;
+                case 'invert':
+                    promptOrderEntry.enabled = !isOn;
+                    break;
+                case 'toggle':
+                    promptOrderEntry.enabled = !promptOrderEntry.enabled;
+                    break;
+                case 'random':
+                    promptOrderEntry.enabled = Math.random() < 0.5;
+                    break;
+            }
+
+            // Reset the token count for the affected prompt
+            counts[toggle.target] = null;
+            affectedPrompts.add(toggle.target);
+            
+            // Skip animation if disabled
+            if (extensionSettings.disableAnimation) {
+                return;
+            }
+
+            // Apply visual feedback with minimal DOM operations
+            const $toggleItem = $(`.toggle-item[data-target="${toggle.target}"]`);
+            
+            if (promptOrderEntry.enabled) {
+                $toggleItem.addClass('enabled').removeClass('disabled');
+            } else {
+                $toggleItem.addClass('disabled').removeClass('enabled');
+            }
+
+            // Use data attribute to track timeout IDs
+            const timeoutId = $toggleItem.data('fade-timeout');
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            
+            const newTimeoutId = setTimeout(() => {
+                $toggleItem.css({
+                    'background-color': 'transparent',
+                    'color': 'transparent'
+                });
+
+                if (!promptOrderEntry.enabled) {
+                    $toggleItem.animate({ opacity: 1.0 }, 300);
+                }
+                
+                $toggleItem.removeData('fade-timeout');
+            }, 1000);
+            
+            $toggleItem.data('fade-timeout', newTimeoutId);
         });
 
-        // Update the UI and save the service settings after all toggles have been processed
+        // Update UI and save only once after all changes are processed
         promptManager.render();
         promptManager.saveServiceSettings();
-
-        console.log(`Group "${groupName}" is now ${isOn ? 'on' : 'off'}`);
     } else {
         console.error(`Group "${groupName}" not found in the current preset.`);
     }
 }
 
-function applyToggleBehavior(promptManager, toggle, isGroupOn) {
-    const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, toggle.target);
-    const counts = promptManager.tokenHandler.getCounts();
-
-    if (!promptOrderEntry) {
-        console.error(`Prompt order entry not found for target: ${toggle.target}`);
-        return;
-    }
-
-    switch (toggle.behavior) {
-        case 'direct':
-            promptOrderEntry.enabled = isGroupOn;
-            break;
-        case 'invert':
-            promptOrderEntry.enabled = !isGroupOn;
-            break;
-        case 'toggle':
-            promptOrderEntry.enabled = !promptOrderEntry.enabled;
-            break;
-        case 'random':
-            promptOrderEntry.enabled = Math.random() < 0.5;
-            break;
-        default:
-            console.error(`Unknown toggle behavior: ${toggle.behavior}`);
-    }
-
-    // Reset the token count for the affected prompt
-    counts[toggle.target] = null;
-
-    // Check if animation should be disabled
-    if (extensionSettings.disableAnimation) {
-        return; // Skip the animation
-    }
-
-    // Find the toggle item element based on data-target attribute
-    const $toggleItem = $(`.toggle-item[data-target="${toggle.target}"]`);
-
-    // Reset the colors before applying the new state
-    $toggleItem.css({
-        'background-color': '',
-        'color': '',
-        'opacity': ''
-    });
-
-    if (promptOrderEntry.enabled) {
-        $toggleItem.addClass('enabled').removeClass('disabled');
-    } else {
-        $toggleItem.addClass('disabled').removeClass('enabled');
-    }
-
-    clearTimeout(toggle.fadeOutTimeout); // Clear any previously scheduled timeout
-    toggle.fadeOutTimeout = setTimeout(() => {
-        requestAnimationFrame(() => {
-            $toggleItem.addClass('fade-out');
-            setTimeout(() => {
-                $toggleItem.removeClass('fade-out');
-                if (!promptOrderEntry.enabled) {
-                    $toggleItem.css('opacity', 1.0);
-                }
-            }, 300);
-        });
-    }, 1000);
-}
-
 async function editGroupName($group, currentName) {
     const newName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, currentName);
     if (newName && newName !== currentName) {
-        if (groupNameExists(newName)) {
-            toastr.warning(`Group "${newName}" already exists!"`);
+        // Use Map for faster lookup
+        if (groupNameMap.has(newName.toLowerCase())) {
+            toastr.warning(`Group "${newName}" already exists!`);
             return;
         }
+        
         const $groupName = $group.find('.group-name');
         $groupName.text(newName);
 
-        // Update the group name in the settings
-        const currentPreset = oai_settings.preset_settings_openai;
-        const groups = extensionSettings.presets[currentPreset];
-        const groupIndex = groups.findIndex(g => g.name === currentName);
-        if (groupIndex !== -1) {
-            groups[groupIndex].name = newName;
-            saveSettings();
+        // Update the group name in the settings using the Map
+        const groupData = groupNameMap.get(currentName.toLowerCase());
+        if (groupData) {
+            const { group } = groupData;
+            group.name = newName;
+            
+            // Update map with new name
+            groupNameMap.delete(currentName.toLowerCase());
+            groupNameMap.set(newName.toLowerCase(), groupData);
+            
+            debouncedSaveSettings();
         }
     }
 }
@@ -460,31 +504,29 @@ async function editGroupName($group, currentName) {
 function deleteGroup($group, groupName) {
     const currentPreset = oai_settings.preset_settings_openai;
     if (extensionSettings.presets[currentPreset]) {
-        extensionSettings.presets[currentPreset] = extensionSettings.presets[currentPreset].filter(g => g.name !== groupName);
-        saveSettings();
+        // Use Map for faster deletion
+        const lowerName = groupName.toLowerCase();
+        if (groupNameMap.has(lowerName)) {
+            const { index } = groupNameMap.get(lowerName);
+            extensionSettings.presets[currentPreset].splice(index, 1);
+            groupNameMap.delete(lowerName);
+            
+            // Rebuild map to update indices
+            buildGroupNameMap();
+            debouncedSaveSettings();
+        }
     }
     $group.remove();
 }
 
-// Also improve the create group dialog function to be more robust
 async function onAddGroupClick() {
-    console.log('Add Group click handler executed');
-    
-    try {
-        const groupName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, '');
-        console.log('Group name entered:', groupName);
-        
-        if (!groupName) {
-            console.log('No group name provided or dialog canceled');
+    const groupName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, '');
+    if (groupName) {
+        // Use Map for faster lookup
+        if (groupNameMap.has(groupName.toLowerCase())) {
+            toastr.warning(`Group "${groupName}" already exists!`);
             return;
         }
-        
-        if (groupNameExists(groupName)) {
-            toastr.warning(`Group "${groupName}" already exists!"`);
-            return;
-        }
-        
-        console.log('Creating new group:', groupName);
         
         const newGroup = {
             name: groupName,
@@ -493,58 +535,42 @@ async function onAddGroupClick() {
         };
 
         const currentPreset = oai_settings.preset_settings_openai;
+        extensionSettings.presets[currentPreset] = extensionSettings.presets[currentPreset] || [];
+        const newIndex = extensionSettings.presets[currentPreset].length;
+        extensionSettings.presets[currentPreset].push(newGroup);
         
-        // Initialize the presets object and current preset if needed
-        if (!extensionSettings.presets) {
-            extensionSettings.presets = {};
-        }
-        
-        if (!extensionSettings.presets[currentPreset]) {
-            extensionSettings.presets[currentPreset] = [];
-        }
-        
-        const groups = extensionSettings.presets[currentPreset];
-        groups.push(newGroup);
+        // Update map with new group
+        groupNameMap.set(groupName.toLowerCase(), { group: newGroup, index: newIndex });
 
-        console.log('Group added to settings, creating UI element');
-        
         const $groupElement = $(extensionSettings.drawerTemplate.replace('{{GROUP_NAME}}', groupName));
-        
-        // Always get a fresh reference to the container to avoid stale references
-        const $container = $('.toggle-groups');
-        $container.append($groupElement);
-        
-        // Update the lookup map with the new group
-        groupLookupMap[groupName] = {
-            data: newGroup,
-            index: groups.length - 1,
-            element: $groupElement
-        };
+        domCache.$toggleGroups.append($groupElement);
 
         // Save the updated settings
-        saveSettings();
-        
-        // Ensure event handlers are attached to the new group
-        attachGroupEventListeners();
-        
-        console.log('New group created successfully:', groupName);
-    } catch (error) {
-        console.error('Error creating new group:', error);
+        debouncedSaveSettings();
     }
 }
 
-function saveSettings() {
-    // Save the extension settings
-    extension_settings[extensionName] = extensionSettings;
-    saveSettingsDebounced();
-}
+function toggleGroupsByString(searchString, targetState) {
+    // Use Map for O(1) lookup
+    const lowerSearchString = searchString.toLowerCase();
+    const groupData = groupNameMap.get(lowerSearchString);
+    
+    if (groupData) {
+        const { group } = groupData;
+        const isOn = targetState === 'toggle' ? !group.isOn : targetState === 'on';
+        updateGroupState(group.name, isOn);
 
-function groupNameExists(groupName) {
-    const currentPreset = oai_settings.preset_settings_openai;
-    const groups = extensionSettings.presets[currentPreset] || [];
-    const groupNameLower = groupName.toLowerCase();
+        const $group = $(`.toggle-group .group-name:contains(${escapeString(group.name)})`).closest('.toggle-group');
+        const $toggleAction = $group.find('.linked-toggle-group-action');
 
-    return groups.some(group => group.name.toLowerCase() === groupNameLower);
+        if (isOn) {
+            $toggleAction.removeClass('fa-toggle-off').addClass('fa-toggle-on');
+        } else {
+            $toggleAction.removeClass('fa-toggle-on').addClass('fa-toggle-off');
+        }
+    } else {
+        toastr.warning(`No groups found containing "${searchString}".`);
+    }
 }
 
 SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -555,7 +581,6 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         toggleGroupsByString(searchString, targetState);
     },
     aliases: ['tg'],
-    // returns: 'void',
     namedArgumentList: [
         SlashCommandNamedArgument.fromProps({
             name: 'state',
@@ -595,34 +620,3 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         </div>
     `,
 }));
-
-function toggleGroupsByString(searchString, targetState) {
-    const currentPreset = oai_settings.preset_settings_openai;
-    const groups = extensionSettings.presets[currentPreset] || [];
-    const searchStringLower = searchString.toLowerCase();
-    let foundGroups = false;
-
-    const $toggleGroups = $('.toggle-groups');
-
-    for (const group of groups) {
-        if (group.name.toLowerCase() === searchStringLower) {
-            foundGroups = true;
-            const isOn = targetState === 'toggle' ? !group.isOn : targetState === 'on';
-            updateGroupState(group.name, isOn);
-
-            const $group = $toggleGroups.find(`.toggle-group .group-name:contains(${escapeString(group.name)})`).closest('.toggle-group');
-            const $toggleAction = $group.find('.linked-toggle-group-action');
-
-            if (isOn) {
-                $toggleAction.removeClass('fa-toggle-off').addClass('fa-toggle-on');
-            } else {
-                $toggleAction.removeClass('fa-toggle-on').addClass('fa-toggle-off');
-            }
-            break; // Exit the loop early since a match was found
-        }
-    }
-
-    if (!foundGroups) {
-        toastr.warning(`No groups found containing "${searchString}".`);
-    }
-}

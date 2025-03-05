@@ -6,7 +6,8 @@
     margin-right: 10px;
     cursor: pointer;
     color: var(--SmartThemeBodyColor);
-    transition: color 0.3s ease;
+    /* Reduce transition duration for better performance */
+    transition: color 0.2s ease;
 }
 
 .linked-toggle-group-edit {
@@ -52,10 +53,12 @@
     align-items: center;
     margin-bottom: 10px;
     border-radius: 5px;
-    transition: color 0.3s ease-in-out, background-color 0.3s ease-in-out;
+    /* Use shorter transition for better performance */
+    transition: color 0.2s ease-in-out, background-color 0.2s ease-in-out;
     line-height: 2; /* Added line-height property */
-    will-change: transform, opacity, background-color;
+    /* Use hardware acceleration for smoother animations */
     transform: translateZ(0);
+    will-change: transform, opacity;
 }
 
 .toggle-item .toggle-target {
@@ -91,14 +94,12 @@
 .toggle-item.enabled {
     background-color: #5ee97e;
     color: #155724;
-    transition: background-color 0.2s ease-out, color 0.2s ease-out, opacity 0.2s ease-out;
 }
 
 .toggle-item.disabled {
     background-color: #f36767;
     color: #6c757d;
     opacity: 0.5;
-    transition: background-color 0.2s ease-out, color 0.2s ease-out, opacity 0.2s ease-out;
 }
 
 .linked-toggle-header {
@@ -127,11 +128,4 @@
     display: flex;
     align-items: center;
     vertical-align: middle; /* Align buttons vertically with the select elements */
-}
-
-/* Add a class for fade transitions */
-.toggle-item.fade-out {
-    background-color: transparent !important;
-    color: transparent !important;
-    transition: background-color 0.3s ease, color 0.3s ease;
 }
