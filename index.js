@@ -34,12 +34,19 @@ jQuery(async () => {
     // Initialize container reference AFTER adding the toggle menu to the DOM
     $toggleGroupsContainer = $('.toggle-groups');
     
+    // Add this logging to verify elements exist
+    console.log('Toggle groups container found:', $toggleGroupsContainer.length);
+    console.log('Add toggle group button found:', $('.add-toggle-group').length);
+    
+    // Make sure event handlers are attached properly with clearer selector and logging
+    $('.add-toggle-group').off('click').on('click', function() {
+        console.log('Add toggle group button clicked');
+        onAddGroupClick();
+    });
+    
     // Load groups for the current preset
     loadGroupsForCurrentPreset();
     attachGroupEventListeners();
-
-    // Event listener for adding a new group
-    $(".add-toggle-group").on("click", onAddGroupClick);
 
     eventSource.on(event_types.OAI_PRESET_EXPORT_READY, (preset) => {
         const currentPreset = oai_settings.preset_settings_openai;
@@ -498,12 +505,23 @@ function deleteGroup($group, groupName) {
 }
 
 async function onAddGroupClick() {
-    const groupName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, '');
-    if (groupName) {
+    console.log('Add Group click handler executed');
+    
+    try {
+        const groupName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, '');
+        console.log('Group name entered:', groupName);
+        
+        if (!groupName) {
+            console.log('No group name provided or dialog canceled');
+            return;
+        }
+        
         if (groupNameExists(groupName)) {
             toastr.warning(`Group "${groupName}" already exists!"`);
             return;
         }
+        
+        console.log('Creating new group:', groupName);
         
         const newGroup = {
             name: groupName,
@@ -516,8 +534,17 @@ async function onAddGroupClick() {
         const groups = extensionSettings.presets[currentPreset];
         groups.push(newGroup);
 
+        console.log('Group added to settings, creating UI element');
+        
         const $groupElement = $(extensionSettings.drawerTemplate.replace('{{GROUP_NAME}}', groupName));
-        $toggleGroupsContainer.append($groupElement);
+        
+        // Verify the container exists before appending
+        if ($toggleGroupsContainer.length === 0) {
+            console.error('Toggle groups container not found, falling back to direct selector');
+            $('.toggle-groups').append($groupElement);
+        } else {
+            $toggleGroupsContainer.append($groupElement);
+        }
         
         // Update the lookup map with the new group
         groupLookupMap[groupName] = {
@@ -528,6 +555,10 @@ async function onAddGroupClick() {
 
         // Save the updated settings
         saveSettings();
+        
+        console.log('New group created successfully:', groupName);
+    } catch (error) {
+        console.error('Error creating new group:', error);
     }
 }
 
