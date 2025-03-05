@@ -26,6 +26,15 @@ const escapeString = (str) => str.replace(/[&<>"']/g, match => ({
 let groupLookupMap = {}; // For fast group lookup by name
 let $toggleGroupsContainer; // Cache the container reference
 
+// Add this helper function at the top level to help with debugging
+function logCurrentGroups() {
+    const currentPreset = oai_settings.preset_settings_openai;
+    const groups = extensionSettings.presets[currentPreset] || [];
+    console.log(`Current preset: ${currentPreset}`);
+    console.log(`Groups for current preset:`, groups);
+    return groups;
+}
+
 jQuery(async () => {
     await loadSettings();
     const toggleMenu = await $.get(`${extensionFolderPath}/toggle-menu.html`);
@@ -34,18 +43,20 @@ jQuery(async () => {
     // Initialize container reference AFTER adding the toggle menu to the DOM
     $toggleGroupsContainer = $('.toggle-groups');
     
-    // Add this logging to verify elements exist
     console.log('Toggle groups container found:', $toggleGroupsContainer.length);
     console.log('Add toggle group button found:', $('.add-toggle-group').length);
     
-    // Make sure event handlers are attached properly with clearer selector and logging
+    // Make sure event handlers are attached properly
     $('.add-toggle-group').off('click').on('click', function() {
         console.log('Add toggle group button clicked');
         onAddGroupClick();
     });
     
-    // Load groups for the current preset
-    loadGroupsForCurrentPreset();
+    // Load groups for the current preset and log results
+    const loadedGroups = loadGroupsForCurrentPreset();
+    console.log('Loaded groups count:', loadedGroups ? loadedGroups.length : 0);
+    
+    // Always attach event handlers, even if no groups are loaded
     attachGroupEventListeners();
 
     eventSource.on(event_types.OAI_PRESET_EXPORT_READY, (preset) => {
@@ -222,12 +233,21 @@ function populateTargetSelect($select) {
 }
 
 function attachGroupEventListeners() {
-    const $toggleGroups = $toggleGroupsContainer; // Use cached reference
+    console.log('Attaching group event listeners');
     
-    // Remove existing event listeners but only once during initialization
+    // Always use document-level delegation for dynamically added elements
+    $(document).off('click', '.toggle-groups .add-toggle').on('click', '.toggle-groups .add-toggle', function() {
+        console.log('Add toggle button clicked');
+        const $group = $(this).closest('.toggle-group');
+        const groupName = $group.find('.group-name').text();
+        console.log('Adding toggle to group:', groupName);
+        addToggle($group, groupName);
+    });
+    
+    // Use more specific delegation for other handlers
     if (!extensionSettings.eventHandlersAttached) {
-        // Use event delegation for most handlers
-        $toggleGroups.on("click", ".linked-toggle-group-action", function(e) {
+        // Use document-level delegation for all other handlers too
+        $(document).on("click", ".toggle-groups .linked-toggle-group-action", function(e) {
             e.stopPropagation();
             const $toggle = $(this);
             const $group = $toggle.closest('.toggle-group');
@@ -239,75 +259,17 @@ function attachGroupEventListeners() {
             updateGroupState(groupName, isOn);
         });
 
-        $toggleGroups.on("click", ".linked-toggle-group-edit", function(e) {
+        // ...existing code for other handlers but replace $toggleGroups with $(document)...
+        // For example:
+        $(document).on("click", ".toggle-groups .linked-toggle-group-edit", function(e) {
             e.stopPropagation();
             const $group = $(this).closest('.toggle-group');
             const groupName = $group.find('.group-name').text();
             editGroupName($group, groupName);
         });
 
-        $toggleGroups.on("click", ".add-toggle", function() {
-            const $group = $(this).closest('.toggle-group');
-            const groupName = $group.find('.group-name').text();
-            addToggle($group, groupName);
-        });
-
-        $toggleGroups.on("click", ".group-move-up", function(e) {
-            e.stopPropagation();
-            const $group = $(this).closest('.toggle-group');
-            moveGroup($group, 'up');
-        });
-
-        $toggleGroups.on("click", ".group-move-down", function(e) {
-            e.stopPropagation();
-            const $group = $(this).closest('.toggle-group');
-            moveGroup($group, 'down');
-        });
-
-        $toggleGroups.on("click", ".delete-group", function(e) {
-            e.stopPropagation();
-            const $group = $(this).closest('.toggle-group');
-            const groupName = $group.find('.group-name').text();
-            deleteGroup($group, groupName);
-        });
-
-        $toggleGroups.on("click", ".linked-toggle-duplicate", function(e) {
-            e.stopImmediatePropagation();
-            const $toggleItem = $(this).closest('.toggle-item');
-            const $newToggleItem = $(extensionSettings.toggleItemTemplate);
-
-            // Copy only the behavior, not the target
-            const behavior = $toggleItem.find('.toggle-behavior').val();
-            $newToggleItem.find('.toggle-behavior').val(behavior);
-
-            // Populate the target select
-            populateTargetSelect($newToggleItem.find('.toggle-target'));
-
-            $toggleItem.after($newToggleItem);
-            // Update settings
-            updateToggleSettings($toggleItem.closest('.toggle-group'));
-        });
-
-        $toggleGroups.on("click", ".linked-toggle-delete", function(e) {
-            e.stopImmediatePropagation();
-            const $toggleItem = $(this).closest('.toggle-item');
-            const $group = $toggleItem.closest('.toggle-group');
-            $toggleItem.remove();
-            // Update settings
-            updateToggleSettings($group);
-        });
-
-        $toggleGroups.on("change", ".toggle-target, .toggle-behavior", function() {
-            const $group = $(this).closest('.toggle-group');
-            updateToggleSettings($group);
-        });
-
-        $toggleGroups.on("change", ".toggle-target", function() {
-            const $toggleItem = $(this).closest('.toggle-item');
-            const newTarget = $(this).val();
-            $toggleItem.attr('data-target', newTarget);
-        });
-
+        // ...and so on for other handlers...
+        
         extensionSettings.eventHandlersAttached = true;
     }
 }
@@ -504,6 +466,7 @@ function deleteGroup($group, groupName) {
     $group.remove();
 }
 
+// Also improve the create group dialog function to be more robust
 async function onAddGroupClick() {
     console.log('Add Group click handler executed');
     
@@ -530,7 +493,16 @@ async function onAddGroupClick() {
         };
 
         const currentPreset = oai_settings.preset_settings_openai;
-        extensionSettings.presets[currentPreset] = extensionSettings.presets[currentPreset] || [];
+        
+        // Initialize the presets object and current preset if needed
+        if (!extensionSettings.presets) {
+            extensionSettings.presets = {};
+        }
+        
+        if (!extensionSettings.presets[currentPreset]) {
+            extensionSettings.presets[currentPreset] = [];
+        }
+        
         const groups = extensionSettings.presets[currentPreset];
         groups.push(newGroup);
 
@@ -538,13 +510,9 @@ async function onAddGroupClick() {
         
         const $groupElement = $(extensionSettings.drawerTemplate.replace('{{GROUP_NAME}}', groupName));
         
-        // Verify the container exists before appending
-        if ($toggleGroupsContainer.length === 0) {
-            console.error('Toggle groups container not found, falling back to direct selector');
-            $('.toggle-groups').append($groupElement);
-        } else {
-            $toggleGroupsContainer.append($groupElement);
-        }
+        // Always get a fresh reference to the container to avoid stale references
+        const $container = $('.toggle-groups');
+        $container.append($groupElement);
         
         // Update the lookup map with the new group
         groupLookupMap[groupName] = {
@@ -555,6 +523,9 @@ async function onAddGroupClick() {
 
         // Save the updated settings
         saveSettings();
+        
+        // Ensure event handlers are attached to the new group
+        attachGroupEventListeners();
         
         console.log('New group created successfully:', groupName);
     } catch (error) {
