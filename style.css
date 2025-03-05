@@ -1,0 +1,139 @@
+.linked-toggle-group-edit,
+.linked-toggle-group-action,
+.group-move-up,
+.group-move-down {
+    font-size: 1.2em;
+    margin-right: 10px;
+    cursor: pointer;
+    color: var(--SmartThemeBodyColor);
+    transition: color 0.3s ease;
+}
+
+.linked-toggle-group-edit {
+    margin-left: 10px;
+}
+
+.drawer-header-right {
+    display: flex;
+    align-items: center;
+}
+
+.linked-toggle-group-edit:hover,
+.group-move-up:hover,
+.group-move-down:hover {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.linked-toggle-group-action.fa-toggle-on {
+    color: var(--SmartThemeQuoteColor);
+}
+
+.group-move-up,
+.group-move-down {
+    margin-right: 5px;
+}
+
+.group-actions {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.delete-group {
+    color: var(--SmartThemeBodyColor);
+}
+
+.linked-toggle-group-action {
+    padding: 5px 5px;
+}
+
+.toggle-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    border-radius: 5px;
+    line-height: 2;
+    /* Using hardware acceleration for smoother transitions */
+    transform: translateZ(0);
+    will-change: background-color, color, opacity;
+}
+
+.toggle-item .toggle-target {
+    flex-grow: 1;
+    margin-right: 10px;
+    margin-top: 5px;
+    margin-left: 10px;
+    padding-left: 5px;
+}
+
+.toggle-item .toggle-behavior {
+    width: 60px;
+    margin-right: 10px;
+    margin-top: 5px;
+}
+
+.toggle-actions {
+    display: flex;
+    align-items: center;
+    margin-right: 10px;
+}
+
+.toggle-actions i {
+    margin-left: 5px;
+    cursor: pointer;
+}
+
+.toggle-behavior {
+    font-size: 18px;
+}
+
+.toggle-item.enabled {
+    background-color: #5ee97e;
+    color: #155724;
+}
+
+.toggle-item.disabled {
+    background-color: #f36767;
+    color: #6c757d;
+    opacity: 0.5;
+}
+
+.linked-toggle-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.toggle-group-header-row {
+    display: flex;
+    align-items: center;
+}
+
+.disable-animation-container {
+    display: flex;
+    align-items: center;
+}
+
+.disable-animation-label {
+    display: flex;
+    align-items: center;
+    margin-left: 10px;
+}
+
+.toggle-actions {
+    display: flex;
+    align-items: center;
+    vertical-align: middle;
+}
+
+/* Optimized transitions for better performance */
+@media screen {
+    .toggle-item {
+        transition: background-color 0.3s ease-out, color 0.3s ease-out, opacity 0.3s ease-out;
+    }
+    
+    /* Disable animations when requested */
+    .disable-animations .toggle-item {
+        transition: none !important;
+    }
+}
