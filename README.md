@@ -17,7 +17,14 @@ Adds toggle groups for Chat Completion Presets that can target multiple entries 
 ## Installation
 
 Use SillyTavern's built-in extension installer:
-`https://github.com/splitclover/chat-toggle-groups`
+`https://github.com/rivey404/test-chat-toggle-groups`
+
+(Original: https://github.com/splitclover/chat-toggle-groups)
+
+> **Note:** This fork runs under the name `test-chat-toggle-groups` and uses
+> its own settings keys — it does not share data with the original
+> `chat-toggle-groups` extension. Both register the `/toggle-group` slash
+> command (alias `/tg`), so enable only one of them at a time.
 
 ## Usage
 

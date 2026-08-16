@@ -10,7 +10,7 @@ import {
     saveSettingsDebounced,
 } from "../../../../script.js";
 
-const extensionName = "chat-toggle-groups";
+const extensionName = "test-chat-toggle-groups";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 let extensionSettings = extension_settings[extensionName];
 const defaultSettings = {
