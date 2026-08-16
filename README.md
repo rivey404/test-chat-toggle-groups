@@ -23,11 +23,16 @@ Use SillyTavern's built-in extension installer:
 
 Find it under Chat Completion Presets tab, just above the prompt list
 
-Group definitions, target assignments, behavior, order, names, and on/off
-states follow the selected preset's save behavior. Use SillyTavern's preset
-**Update/Save** action to persist changes. If you switch presets, reload, or
-reset a preset before saving, unsaved group changes are discarded along with
-other unsaved preset changes.
+Group configuration — definitions, target assignments, behaviors, order,
+names, and on/off states — is saved to SillyTavern's settings automatically
+as you edit.
+
+Flipping a group applies the on/off state to its targeted prompts
+immediately, but the resulting prompt enablement follows the selected
+preset's save behavior: use SillyTavern's preset **Update/Save** action to
+persist which prompts end up enabled. If you switch presets, reload, or
+reset a preset before saving, those prompt states are discarded (the group
+configuration itself is not).
 
 Existing group data from older versions is migrated automatically into the
 selected preset the first time it is loaded.

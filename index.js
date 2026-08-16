@@ -153,8 +153,9 @@ function getOrCreateCurrentPresetToggleData() {
     return oai_settings.extensions[extensionName];
 }
 
-// saveSettingsDebounced is already debounced by SillyTavern — call it directly.
-function debouncedSaveSettings() {
+// Persist to extension settings immediately; SillyTavern's own saveSettingsDebounced
+// (lodash, 1 s) handles the actual write debouncing.
+function persistSettings() {
     extension_settings[extensionName] = extensionSettings;
     saveSettingsDebounced();
 }
@@ -240,6 +241,12 @@ async function loadSettings() {
         extensionSettings.presets = {};
     }
 
+    // Remove keys persisted by older versions: templates now load from disk,
+    // and the animation/debounce options were removed.
+    for (const staleKey of ['disableAnimation', 'saveDebounceMs', 'drawerTemplate', 'toggleItemTemplate']) {
+        delete extensionSettings[staleKey];
+    }
+
     // Load templates just once and cache them in module scope (not in settings,
     // so they don't get written to settings.json on every save)
     [drawerTemplate, toggleItemTemplate] = await Promise.all([
@@ -307,8 +314,7 @@ function loadGroups(groups) {
             $target.val(toggle.target);
             
             $toggleItem.find('.toggle-behavior').val(toggle.behavior);
-            $toggleItem.attr('data-target', toggle.target);
-            
+
             toggleItemsFragment.appendChild($toggleItem[0]);
         });
 
@@ -320,15 +326,18 @@ function loadGroups(groups) {
 }
 
 // Cache the options HTML — rebuilding means re-sorting the whole prompt list,
-// so only do it when the prompts array actually changes.
-let cachedOptionsPrompts = null;
+// so only do it when the prompt list content actually changes. Keyed on
+// content rather than array identity because ST's PromptManager mutates the
+// prompts array in place (push/splice/rename).
+let cachedOptionsKey = null;
 let cachedOptionsHtml = null;
 
 // Prepare options HTML once to avoid repetitive DOM creation
 function prepareTargetOptions(promptManager) {
     const prompts = promptManager.serviceSettings.prompts;
 
-    if (prompts === cachedOptionsPrompts && cachedOptionsHtml !== null) {
+    const cacheKey = prompts.map(prompt => `${prompt.identifier}\u0000${prompt.name}`).join('\u0001');
+    if (cacheKey === cachedOptionsKey && cachedOptionsHtml !== null) {
         return cachedOptionsHtml;
     }
 
@@ -338,10 +347,10 @@ function prepareTargetOptions(promptManager) {
     let optionsHtml = '<option value="" disabled hidden selected>Select a target</option>';
 
     sortedPrompts.forEach(prompt => {
-        optionsHtml += `<option value="${prompt.identifier}" data-identifier="${prompt.identifier}">${escapeString(prompt.name)}</option>`;
+        optionsHtml += `<option value="${escapeString(prompt.identifier)}" data-identifier="${escapeString(prompt.identifier)}">${escapeString(prompt.name)}</option>`;
     });
 
-    cachedOptionsPrompts = prompts;
+    cachedOptionsKey = cacheKey;
     cachedOptionsHtml = optionsHtml;
 
     return optionsHtml;
@@ -415,12 +424,6 @@ function attachEventListeners() {
         const $group = $(this).closest('.toggle-group');
         updateToggleSettings($group);
     });
-
-    $body.on("change", ".toggle-target", function() {
-        const $toggleItem = $(this).closest('.toggle-item');
-        const newTarget = $(this).val();
-        $toggleItem.attr('data-target', newTarget);
-    });
 }
 
 function duplicateToggleItem($button) {
@@ -441,7 +444,6 @@ function duplicateToggleItem($button) {
     $newToggleItem.find('.toggle-target').html(targetOptions);
     if (target) {
         $newToggleItem.find('.toggle-target').val(target);
-        $newToggleItem.attr('data-target', target);
     }
 
     $toggleItem.after($newToggleItem);
@@ -482,7 +484,7 @@ function updateToggleSettings($group) {
             });
         });
 
-        debouncedSaveSettings();
+        persistSettings();
     }
 }
 
@@ -498,10 +500,18 @@ function moveGroup($group, direction) {
     const index = groupData.index;
 
     if (direction === 'up' && index > 0) {
-        $group.insertBefore($group.prev('.toggle-group'));
+        const $neighbor = $group.prev('.toggle-group');
+        if (!$neighbor.length) {
+            return; // DOM is out of sync with the data — bail instead of corrupting order
+        }
+        $group.insertBefore($neighbor);
         [groups[index], groups[index - 1]] = [groups[index - 1], groups[index]];
     } else if (direction === 'down' && index < groups.length - 1) {
-        $group.insertAfter($group.next('.toggle-group'));
+        const $neighbor = $group.next('.toggle-group');
+        if (!$neighbor.length) {
+            return; // DOM is out of sync with the data — bail instead of corrupting order
+        }
+        $group.insertAfter($neighbor);
         [groups[index], groups[index + 1]] = [groups[index + 1], groups[index]];
     } else {
         return; // No move happened — skip the map rebuild and save
@@ -509,7 +519,7 @@ function moveGroup($group, direction) {
 
     // Rebuild group name map after reordering
     buildGroupNameMap();
-    debouncedSaveSettings();
+    persistSettings();
 }
 
 function updateGroupState(groupName, isOn) {
@@ -524,6 +534,7 @@ function updateGroupState(groupName, isOn) {
         const counts = promptManager.tokenHandler.getCounts();
 
         // Process all toggles efficiently
+        let appliedCount = 0;
         group.toggles.forEach(toggle => {
             const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, toggle.target);
             
@@ -549,19 +560,24 @@ function updateGroupState(groupName, isOn) {
 
             // Reset the token count for the affected prompt
             counts[toggle.target] = null;
+            appliedCount++;
         });
 
-        // Update UI and save only once after all changes are processed
-        promptManager.render();
-        promptManager.saveServiceSettings();
-        debouncedSaveSettings();
+        // Skip render/save entirely when no toggle applied (empty group or
+        // all targets missing from the prompt list)
+        if (appliedCount > 0) {
+            // Update UI and save only once after all changes are processed
+            promptManager.render();
+            promptManager.saveServiceSettings();
+            persistSettings();
+        }
     } else {
         console.error(`Group "${groupName}" not found in the current preset.`);
     }
 }
 
 async function editGroupName($group, currentName) {
-    const newName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, currentName);
+    const newName = (await callGenericPopup("Enter a new name for the group:", POPUP_TYPE.INPUT, currentName))?.trim();
     if (newName && newName !== currentName) {
         const groupData = groupNameMap.get(currentName.toLowerCase());
         const existing = groupNameMap.get(newName.toLowerCase());
@@ -584,7 +600,7 @@ async function editGroupName($group, currentName) {
             groupNameMap.delete(currentName.toLowerCase());
             groupNameMap.set(newName.toLowerCase(), groupData);
 
-            debouncedSaveSettings();
+            persistSettings();
         }
     }
 }
@@ -600,13 +616,13 @@ function deleteGroup($group, groupName) {
         // Rebuild map to update indices
         buildGroupNameMap();
 
-        debouncedSaveSettings();
+        persistSettings();
     }
     $group.remove();
 }
 
 async function onAddGroupClick() {
-    const groupName = await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, '');
+    const groupName = (await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, ''))?.trim();
     if (groupName) {
         // Use Map for faster lookup
         if (groupNameMap.has(groupName.toLowerCase())) {
@@ -627,11 +643,11 @@ async function onAddGroupClick() {
         // Update map with new group
         groupNameMap.set(groupName.toLowerCase(), { group: newGroup, index: newIndex });
 
-        const $groupElement = $(drawerTemplate.replace('{{GROUP_NAME}}', groupName));
+        const $groupElement = $(drawerTemplate.replace('{{GROUP_NAME}}', escapeString(groupName)));
         domCache.$toggleGroups.append($groupElement);
 
         // Save the updated settings
-        debouncedSaveSettings();
+        persistSettings();
     }
 }
 
