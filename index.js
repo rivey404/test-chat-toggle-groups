@@ -294,12 +294,16 @@ function loadGroupsForCurrentPreset() {
     loadGroups(groups);
 }
 
-// Grey warning symbol in the middle of every group row. Static for now —
-// state-sync tracking is not implemented yet, so every group may be out
-// of date relative to the current prompt list.
+// Grey warning symbol marking a toggle group as possibly out of sync — a
+// setup group was applied after this group was last used. Idempotent: it is
+// called both at render time and right after a setup Apply.
 function addGroupWarningIcon($groupElement) {
-    $groupElement.find('.inline-drawer-header').append(
-        '<span class="group-warning fa-solid fa-triangle-exclamation" title="State sync is not tracked yet — this group may be out of date relative to the current prompt list."></span>'
+    const $header = $groupElement.find('.inline-drawer-header');
+    if ($header.find('.group-warning').length) {
+        return;
+    }
+    $header.append(
+        '<span class="group-warning fa-solid fa-triangle-exclamation" title="A setup group was applied after this group was last used — its switch state may not match the current prompt list."></span>'
     );
 }
 
@@ -319,12 +323,16 @@ function loadGroups(groups) {
 
     groups.forEach(group => {
         const $groupElement = $(drawerTemplate.replace('{{GROUP_NAME}}', escapeString(group.name)));
-        addGroupWarningIcon($groupElement);
 
         if (group.type === 'setup') {
             renderSetupGroup($groupElement, group);
             fragment.appendChild($groupElement[0]);
             return;
+        }
+
+        // Desync warning: a setup was applied after this group was last used
+        if (group.stale) {
+            addGroupWarningIcon($groupElement);
         }
 
         const $toggleList = $groupElement.find('.toggle-list');
@@ -655,6 +663,17 @@ function applySetupGroup(group) {
 
     // Skip render/save entirely when nothing changed (snapshot targets all gone)
     if (appliedCount > 0) {
+        // The Apply silently changed prompt states underneath the toggle groups —
+        // mark them desynced (data flags persist; icons are re-added to the DOM).
+        getCurrentPresetGroups().forEach(currentGroup => {
+            if (currentGroup.type !== 'setup') {
+                currentGroup.stale = true;
+            }
+        });
+        domCache.$toggleGroups.find('.toggle-group:not(.setup-group)').each(function() {
+            addGroupWarningIcon($(this));
+        });
+
         promptManager.render();
         promptManager.saveServiceSettings();
         persistSettings();
@@ -674,6 +693,16 @@ function updateGroupState(groupName, isOn) {
     if (groupData) {
         const { group } = groupData;
         group.isOn = isOn;
+
+        // Using the switch re-asserts the group's behaviors — clear any
+        // desync warning (any switch interaction counts, even on empty groups)
+        if (group.stale) {
+            group.stale = false;
+            const $groupElement = domCache.$toggleGroups.find('.toggle-group').filter(function() {
+                return $(this).find('.group-name').first().text() === group.name;
+            });
+            $groupElement.find('.group-warning').remove();
+        }
 
         // Get prompt manager once for all toggle operations
         const promptManager = getPromptManager();
@@ -790,8 +819,7 @@ async function onAddGroupClick(isSetup = false) {
 
         const $groupElement = $(drawerTemplate.replace('{{GROUP_NAME}}', escapeString(groupName)));
 
-        // Grey warning symbol + setup layout (mirrors loadGroups)
-        addGroupWarningIcon($groupElement);
+        // New groups start clean; setup groups get the Apply/Update layout
         if (isSetup) {
             renderSetupGroup($groupElement, newGroup);
         }

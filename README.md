@@ -1,25 +1,35 @@
-# Toggle groups for SillyTavern
+# Toggle Groups for SillyTavern
 
 ## Overview
 
-Adds toggle groups for Chat Completion Presets that can target multiple entries at once.
+Adds toggle groups for Chat Completion Presets that can target multiple
+prompt entries at once. There are two kinds of groups:
+
+- **Toggle groups** — one switch that drives several prompts at once.
+- **Setup groups** — snapshots of which prompts are currently enabled,
+  which you can restore later.
 
 ## Features
 
-- Toggle groups are stored inside their Chat Completion preset.
-- Preset import and export include the complete group configuration.
-- Four different possible behaviors for each target:
-  1. Direct: Will copy the state of the main toggle
-  2. Invert: Will copy the opposite of the main toggle
-  3. Toggle: Will toggle states for each main toggle change
-  4. Random: Will settle on a random state for each main toggle change
-- Setup groups: save a snapshot of which prompts are currently enabled
-  (**Update**) and restore it later (**Apply**) — applying is an exact match,
-  enabling the snapshot's prompts and disabling all others. Setups have no
-  on/off state and are not affected by the `/toggle-group` command.
-- A grey warning triangle appears in every group row. It is a static
-  placeholder for now: the extension does not yet track whether a group or
-  setup is in sync with the current prompt list.
+- Groups are stored inside their Chat Completion preset. Preset export and
+  import carry the complete group configuration, including setup snapshots.
+- Four behaviors for each target in a toggle group:
+  1. Direct: copies the state of the group's switch
+  2. Invert: copies the opposite of the group's switch
+  3. Toggle: flips its state on each switch change
+  4. Random: settles on a random state on each switch change
+- Setup groups: **Update** captures which prompts are currently enabled
+  (all of them), **Apply** restores that snapshot as an exact match —
+  snapshot prompts enabled, everything else disabled. Setups have no
+  on/off state, the Update button stays visible but dimmed once a snapshot
+  exists, and they are ignored by `/toggle-group`.
+- After applying a setup, toggle groups show a grey warning triangle:
+  their switch state may no longer match the prompt list. It persists
+  across reloads and clears when the group's switch is next used (click or
+  `/toggle-group`). Setup groups never show it.
+- Long group names wrap to the next line instead of overflowing the row.
+- Slash command: `/toggle-group <group name> [state=on|off|toggle]`
+  (alias `/tg`; default state is `toggle`).
 
 ## Installation
 
@@ -35,25 +45,28 @@ Use SillyTavern's built-in extension installer:
 
 ## Usage
 
-Find it under Chat Completion Presets tab, just above the prompt list
+Find it under the Chat Completion Presets tab, just above the prompt list.
+**+ Group** adds a toggle group, **+ Setup** adds a setup group. Setup
+rows carry **Apply** / **Update** buttons instead of a switch.
 
-Group configuration — definitions, target assignments, behaviors, order,
-names, and on/off states — is saved to SillyTavern's settings automatically
-as you edit.
+Group configuration — definitions, targets, behaviors, order, names,
+on/off states, and setup snapshots — is saved to SillyTavern's settings
+automatically as you edit.
 
-Flipping a group applies the on/off state to its targeted prompts
-immediately, but the resulting prompt enablement follows the selected
-preset's save behavior: use SillyTavern's preset **Update/Save** action to
-persist which prompts end up enabled. If you switch presets, reload, or
-reset a preset before saving, those prompt states are discarded (the group
-configuration itself is not).
+Flipping a group applies the state to its targeted prompts immediately,
+but the resulting prompt enablement follows the selected preset's save
+behavior: use SillyTavern's preset **Update/Save** action to persist which
+prompts end up enabled. If you switch presets, reload, or reset a preset
+before saving, those prompt states are discarded (the group configuration
+itself is not).
 
 Existing group data from older versions is migrated automatically into the
 selected preset the first time it is loaded.
 
 ## Contributing
 
-Contributions to improve this extension are welcome. Please fork the repository and submit a pull request with your changes.
+Contributions to improve this extension are welcome. Please fork the
+repository and submit a pull request with your changes.
 
 ---
 
