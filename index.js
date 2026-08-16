@@ -52,6 +52,10 @@ function cloneGroups(groups) {
                     .filter(toggle => toggle && typeof toggle === 'object')
                     .map(toggle => ({ ...toggle }))
                 : [],
+            // Snapshot of prompt enabled states for setup groups; null = not saved yet
+            setup: group.setup && typeof group.setup === 'object'
+                ? { ...group.setup }
+                : null,
         }));
 }
 
@@ -180,8 +184,12 @@ jQuery(async () => {
 });
 
 function setupEventListeners() {
-    // Add toggle group button
-    $(".add-toggle-group").on("click", onAddGroupClick);
+    // Add toggle group button (the lambda keeps jQuery's event object from
+    // landing in the isSetup parameter)
+    $(".add-toggle-group").on("click", () => onAddGroupClick(false));
+
+    // Add setup group button — a setup saves/restores the enabled state of all prompts
+    $(".add-setup-group").on("click", () => onAddGroupClick(true));
 
     // Migrate legacy data before SillyTavern applies the incoming preset.
     eventSource.on(event_types.OAI_PRESET_CHANGED_BEFORE, migratePresetToggleData);
@@ -265,6 +273,17 @@ function getPromptManager() {
     return promptManagerCache;
 }
 
+// Snapshot the enabled state of every prompt in the current prompt manager.
+// Reads state the same way updateGroupState does (prompt-order entries).
+function collectPromptStates(promptManager) {
+    const snapshot = {};
+    promptManager.serviceSettings.prompts.forEach(prompt => {
+        const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, prompt.identifier);
+        snapshot[prompt.identifier] = promptOrderEntry ? !!promptOrderEntry.enabled : false;
+    });
+    return snapshot;
+}
+
 function loadGroupsForCurrentPreset() {
     const groups = getCurrentPresetGroups();
     
@@ -273,6 +292,15 @@ function loadGroupsForCurrentPreset() {
     
     // Load the groups into the UI
     loadGroups(groups);
+}
+
+// Grey warning symbol in the middle of every group row. Static for now —
+// state-sync tracking is not implemented yet, so every group may be out
+// of date relative to the current prompt list.
+function addGroupWarningIcon($groupElement) {
+    $groupElement.find('.inline-drawer-header').append(
+        '<span class="group-warning fa-solid fa-triangle-exclamation" title="State sync is not tracked yet — this group may be out of date relative to the current prompt list."></span>'
+    );
 }
 
 function loadGroups(groups) {
@@ -291,6 +319,14 @@ function loadGroups(groups) {
 
     groups.forEach(group => {
         const $groupElement = $(drawerTemplate.replace('{{GROUP_NAME}}', escapeString(group.name)));
+        addGroupWarningIcon($groupElement);
+
+        if (group.type === 'setup') {
+            renderSetupGroup($groupElement, group);
+            fragment.appendChild($groupElement[0]);
+            return;
+        }
+
         const $toggleList = $groupElement.find('.toggle-list');
         const $toggleAction = $groupElement.find('.linked-toggle-group-action');
 
@@ -356,6 +392,31 @@ function prepareTargetOptions(promptManager) {
     return optionsHtml;
 }
 
+// Render a setup group drawer: no on/off toggle, no toggle list — just
+// Apply (restore snapshot) and Update (capture current state) buttons.
+function renderSetupGroup($groupElement, group) {
+    $groupElement.addClass('setup-group');
+
+    // Setups have no on/off state — drop the toggle icon
+    $groupElement.find('.linked-toggle-group-action').remove();
+
+    const $headerRight = $groupElement.find('.drawer-header-right');
+    $headerRight.prepend(
+        '<span class="setup-apply menu_button interactable" title="Restore the saved prompt state">Apply</span>' +
+        '<span class="setup-update menu_button interactable" title="Capture the current prompt state into this setup">Update</span>'
+    );
+
+    // Dim the Update button once a snapshot exists (cosmetic — it still works)
+    if (group.setup && Object.keys(group.setup).length > 0) {
+        $headerRight.find('.setup-update').addClass('dimmed');
+    }
+
+    // No toggle rows for setups — remove the Add Toggle button and list,
+    // keeping only Delete Group
+    $groupElement.find('.group-actions .add-toggle').remove();
+    $groupElement.find('.toggle-list').remove();
+}
+
 function attachEventListeners() {
     // Use event delegation for most events to improve performance
     const $body = $('body');
@@ -371,6 +432,27 @@ function attachEventListeners() {
 
         const isOn = $toggle.hasClass('fa-toggle-on');
         updateGroupState(groupName, isOn);
+    });
+
+    // Setup group: restore the saved snapshot
+    $body.on("click", ".setup-apply", function(e) {
+        e.stopPropagation();
+        const $group = $(this).closest('.toggle-group');
+        const groupData = getGroupDataFromElement($group);
+        if (groupData) {
+            applySetupGroup(groupData.group);
+        }
+    });
+
+    // Setup group: capture the current prompt state
+    $body.on("click", ".setup-update", function(e) {
+        e.stopPropagation();
+        const $group = $(this).closest('.toggle-group');
+        const groupData = getGroupDataFromElement($group);
+        if (groupData) {
+            updateSetupGroup(groupData.group);
+            $(this).addClass('dimmed');
+        }
     });
 
     // Group name editing
@@ -474,6 +556,10 @@ function updateToggleSettings($group) {
     
     if (groupData) {
         const { group } = groupData;
+        // Setup groups have no toggle rows
+        if (group.type === 'setup') {
+            return;
+        }
         group.toggles = [];
 
         $group.find('.toggle-item').each(function() {
@@ -522,9 +608,69 @@ function moveGroup($group, direction) {
     persistSettings();
 }
 
+// Resolve a group's stored data from a rendered drawer element
+function getGroupDataFromElement($group) {
+    return groupNameMap.get($group.find('.group-name').text().toLowerCase()) || null;
+}
+
+// Apply a setup snapshot: exact match — snapshot-ON prompts are enabled and
+// every other prompt is disabled.
+function applySetupGroup(group) {
+    if (!group.setup || Object.keys(group.setup).length === 0) {
+        toastr.warning(`Setup group "${group.name}" has no saved snapshot yet. Use Update first.`);
+        return;
+    }
+
+    const promptManager = getPromptManager();
+    const counts = promptManager.tokenHandler.getCounts();
+    let appliedCount = 0;
+
+    // Exact match: disable everything currently in the prompt list
+    promptManager.serviceSettings.prompts.forEach(prompt => {
+        const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, prompt.identifier);
+        if (!promptOrderEntry) {
+            return;
+        }
+        if (promptOrderEntry.enabled) {
+            counts[prompt.identifier] = null;
+            appliedCount++;
+        }
+        promptOrderEntry.enabled = false;
+    });
+
+    // Then re-enable exactly the snapshot's ON prompts (missing targets are skipped)
+    Object.entries(group.setup).forEach(([target, enabled]) => {
+        if (!enabled) {
+            return;
+        }
+        const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, target);
+        if (!promptOrderEntry) {
+            console.error(`Prompt order entry not found for target: ${target}`);
+            return;
+        }
+        promptOrderEntry.enabled = true;
+        counts[target] = null;
+        appliedCount++;
+    });
+
+    // Skip render/save entirely when nothing changed (snapshot targets all gone)
+    if (appliedCount > 0) {
+        promptManager.render();
+        promptManager.saveServiceSettings();
+        persistSettings();
+    }
+}
+
+// Capture the current enabled state of every prompt into the setup snapshot
+function updateSetupGroup(group) {
+    group.setup = collectPromptStates(getPromptManager());
+    persistSettings();
+    toastr.success(`Setup group "${group.name}" saved with the current prompt state.`);
+}
+
 function updateGroupState(groupName, isOn) {
     const groupData = groupNameMap.get(groupName.toLowerCase());
-    
+
     if (groupData) {
         const { group } = groupData;
         group.isOn = isOn;
@@ -535,7 +681,8 @@ function updateGroupState(groupName, isOn) {
 
         // Process all toggles efficiently
         let appliedCount = 0;
-        group.toggles.forEach(toggle => {
+        const toggles = Array.isArray(group.toggles) ? group.toggles : [];
+        toggles.forEach(toggle => {
             const promptOrderEntry = promptManager.getPromptOrderEntry(promptManager.activeCharacter, toggle.target);
             
             if (!promptOrderEntry) {
@@ -621,7 +768,7 @@ function deleteGroup($group, groupName) {
     $group.remove();
 }
 
-async function onAddGroupClick() {
+async function onAddGroupClick(isSetup = false) {
     const groupName = (await callGenericPopup("Enter a name for the new group:", POPUP_TYPE.INPUT, ''))?.trim();
     if (groupName) {
         // Use Map for faster lookup
@@ -629,21 +776,26 @@ async function onAddGroupClick() {
             toastr.warning(`Group "${groupName}" already exists!`);
             return;
         }
-        
-        const newGroup = {
-            name: groupName,
-            toggles: [],
-            isOn: false
-        };
+
+        const newGroup = isSetup
+            ? { name: groupName, type: 'setup', setup: null }
+            : { name: groupName, toggles: [], isOn: false };
 
         const groups = getOrCreateCurrentPresetToggleData().groups;
         const newIndex = groups.length;
         groups.push(newGroup);
-        
+
         // Update map with new group
         groupNameMap.set(groupName.toLowerCase(), { group: newGroup, index: newIndex });
 
         const $groupElement = $(drawerTemplate.replace('{{GROUP_NAME}}', escapeString(groupName)));
+
+        // Grey warning symbol + setup layout (mirrors loadGroups)
+        addGroupWarningIcon($groupElement);
+        if (isSetup) {
+            renderSetupGroup($groupElement, newGroup);
+        }
+
         domCache.$toggleGroups.append($groupElement);
 
         // Save the updated settings
@@ -658,6 +810,11 @@ function toggleGroupsByString(searchString, targetState) {
     
     if (groupData) {
         const { group } = groupData;
+        // Setups have no on/off state — the slash command only drives toggles
+        if (group.type === 'setup') {
+            toastr.info(`Setup group "${group.name}" has no on/off state. Use its Apply/Update buttons.`);
+            return;
+        }
         const isOn = targetState === 'toggle' ? !group.isOn : targetState === 'on';
         updateGroupState(group.name, isOn);
 

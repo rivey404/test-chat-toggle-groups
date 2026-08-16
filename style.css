@@ -102,3 +102,48 @@
     align-items: center;
     vertical-align: middle; /* Align buttons vertically with the select elements */
 }
+
+/* Make the group header a wrapping flex row so a long group name wraps to the
+   next line instead of overflowing. Scoped to .toggle-group to avoid affecting
+   other SillyTavern drawers. */
+.toggle-group .inline-drawer-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* Cap the group name at ~45% of the row width and let even one long
+   unbroken word wrap */
+.group-name {
+    order: 0;
+    max-width: 45%;
+    overflow-wrap: anywhere;
+}
+
+.drawer-header-right {
+    order: 2;
+    margin-left: auto;
+}
+
+/* Grey warning symbol in the middle of every group row — a static placeholder
+   until state-sync tracking exists */
+.group-warning {
+    order: 1;
+    color: #999;
+    font-size: 0.9em;
+    margin: 0 10px;
+    align-self: center;
+}
+
+/* Apply/Update buttons on setup groups */
+.setup-apply,
+.setup-update {
+    padding: 5px 8px;
+    margin-right: 10px;
+    cursor: pointer;
+}
+
+/* Dimmed once a snapshot exists (cosmetic — still clickable) */
+.setup-update.dimmed {
+    opacity: 0.5;
+}

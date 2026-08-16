@@ -13,6 +13,13 @@ Adds toggle groups for Chat Completion Presets that can target multiple entries 
   2. Invert: Will copy the opposite of the main toggle
   3. Toggle: Will toggle states for each main toggle change
   4. Random: Will settle on a random state for each main toggle change
+- Setup groups: save a snapshot of which prompts are currently enabled
+  (**Update**) and restore it later (**Apply**) — applying is an exact match,
+  enabling the snapshot's prompts and disabling all others. Setups have no
+  on/off state and are not affected by the `/toggle-group` command.
+- A grey warning triangle appears in every group row. It is a static
+  placeholder for now: the extension does not yet track whether a group or
+  setup is in sync with the current prompt list.
 
 ## Installation
 
