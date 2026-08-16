@@ -53,12 +53,7 @@
     align-items: center;
     margin-bottom: 10px;
     border-radius: 5px;
-    /* Use shorter transition for better performance */
-    transition: color 0.2s ease-in-out, background-color 0.2s ease-in-out;
-    line-height: 2; /* Added line-height property */
-    /* Use hardware acceleration for smoother animations */
-    transform: translateZ(0);
-    will-change: transform, opacity;
+    line-height: 2;
 }
 
 .toggle-item .toggle-target {
@@ -91,17 +86,6 @@
     font-size: 18px;
 }
 
-.toggle-item.enabled {
-    background-color: #5ee97e;
-    color: #155724;
-}
-
-.toggle-item.disabled {
-    background-color: #f36767;
-    color: #6c757d;
-    opacity: 0.5;
-}
-
 .linked-toggle-header {
     display: flex;
     justify-content: space-between;
@@ -111,17 +95,6 @@
 .toggle-group-header-row {
     display: flex;
     align-items: center;
-}
-
-.disable-animation-container {
-    display: flex;
-    align-items: center;
-}
-
-.disable-animation-label {
-    display: flex;
-    align-items: center;
-    margin-left: 10px;
 }
 
 .toggle-actions {
